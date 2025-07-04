@@ -24,6 +24,7 @@ import (
 	"github.com/argoproj/argo-rollouts/utils/evaluate"
 	metricutil "github.com/argoproj/argo-rollouts/utils/metric"
 	timeutil "github.com/argoproj/argo-rollouts/utils/time"
+	"github.com/prometheus/prometheus/promql/parser"
 )
 
 const (
@@ -58,6 +59,10 @@ func (p *Provider) GetMetadata(metric v1alpha1.Metric) map[string]string {
 
 func (p *Provider) executeQuery(ctx context.Context, metric v1alpha1.Metric) (model.Value, v1.Warnings, error) {
 	if metric.Provider.Prometheus.RangeQuery != nil {
+		_, err := parser.ParseExpr(metric.Provider.Prometheus.Query)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse query : %w", err)
+		}
 		start, err := evaluate.EvalTime(metric.Provider.Prometheus.RangeQuery.Start)
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to parse rangeQuery.start as time: %w", err)
@@ -70,6 +75,7 @@ func (p *Provider) executeQuery(ctx context.Context, metric v1alpha1.Metric) (mo
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to parse rangeQuery.step as duration: %w", err)
 		}
+
 		return p.api.QueryRange(ctx, metric.Provider.Prometheus.Query, v1.Range{
 			Start: start,
 			End:   end,
