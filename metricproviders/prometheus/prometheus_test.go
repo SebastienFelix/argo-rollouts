@@ -1,6 +1,7 @@
 package prometheus
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net/http"
@@ -17,7 +18,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/argoproj/argo-rollouts/pkg/apis/rollouts/v1alpha1"
+	"github.com/prometheus/prometheus/promql/parser"
 )
+
+func Test_PromQLChecker_Valid(t *testing.T) {
+
+	_, err := parser.ParseExpr("test{}")
+	assert.True(t, err == nil)
+}
+
+func Test_PromQLChecker_Invalid(t *testing.T) {
+
+	_, err := parser.ParseExpr("test{}}")
+	assert.True(t, err != nil)
+}
 
 const (
 	AccessToken = "MyAccessToken"
@@ -115,6 +129,39 @@ func TestRunSuccessfully(t *testing.T) {
 	assert.Equal(t, "10", measurement.Value)
 	assert.NotNil(t, measurement.FinishedAt)
 	assert.Equal(t, v1alpha1.AnalysisPhaseSuccessful, measurement.Phase)
+}
+
+func TestRunFailedWithBadQuery(t *testing.T) {
+	e := log.Entry{}
+	promServer := mockPromServer(AccessToken)
+	defer promServer.Close()
+	timeout := int64(5)
+	metric := v1alpha1.Metric{
+		Name:             "foo",
+		SuccessCondition: "result[0] == 10",
+		FailureCondition: "result[0] != 10",
+		Provider: v1alpha1.MetricProvider{
+			Prometheus: &v1alpha1.PrometheusMetric{
+				Address: promServer.URL,
+				Query:   "test{}}",
+				Timeout: &timeout,
+				RangeQuery: &v1alpha1.PrometheusRangeQueryArgs{
+					Start: `date("2023-08-14 00:00:00", "2006-01-02 15:04:05", "UTC") - duration("1h")`,
+					End:   `date("2023-08-14 00:00:00", "2006-01-02 15:04:05", "UTC")`,
+					Step:  "1m",
+				},
+			},
+		},
+	}
+
+	api, err := NewPrometheusAPI(metric)
+	assert.NoError(t, err)
+	p, _ := NewPrometheusProvider(api, e, metric)
+
+	ctx, _ := context.WithTimeout(context.Background(), p.timeout)
+	_, _, err = p.executeQuery(ctx, metric)
+
+	assert.EqualError(t, err, "failed to parse query : 1:7: parse error: unexpected character: '}'")
 }
 
 func TestRunSuccessfullyWithRangeQuery(t *testing.T) {
